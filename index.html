@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Dark Video Roulette</title>
+    <!-- Підключення бібліотек Telegram та Socket.io -->
+    <script src="https://telegram.org"></script>
+    <script src="https://socket.io"></script>
+    <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; padding: 0; background: #0a0a0c; color: #f3f4f6; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+        
+        /* ГЛИБОКА ТЕМНА ТЕМА ДЛЯ РЕЄСТРАЦІЇ (ОНБОРДИНГ) */
+        #onboarding-screen { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #0a0a0c; z-index: 100; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 30px; }
+        .form-card { background: #121216; width: 100%; max-width: 400px; padding: 25px; border-radius: 16px; border: 1px solid #22222a; box-shadow: 0 10px 30px rgba(0,0,0,0.7); }
+        .form-card h2 { margin-top: 0; color: #fff; font-size: 24px; text-align: center; margin-bottom: 20px; }
+        .input-group { margin-bottom: 15px; display: flex; flex-direction: column; gap: 5px; }
+        .input-group label { font-size: 14px; color: #9ca3af; }
+        .input-group input { padding: 12px; border-radius: 8px; border: 1px solid #2d2d3d; background: #1a1a24; color: #fff; font-size: 16px; outline: none; }
+        .input-group input:focus { border-color: #2481cc; }
+        #startAppBtn { width: 100%; padding: 14px; background: #2481cc; color: white; border: none; border-radius: 10px; font-size: 16px; font-weight: bold; cursor: pointer; margin-top: 10px; }
+
+        /* ІНТЕРФЕЙС ВІДЕОЧАТУ */
+        #video-container { flex: 1; position: relative; width: 100%; background: #020203; }
+        #remoteVideo { width: 100%; height: 100%; object-fit: cover; background: #0f0f12; }
+        #localVideo { position: absolute; top: 15px; right: 15px; width: 110px; height: 160px; object-fit: cover; border-radius: 12px; border: 2px solid #2d2d3d; box-shadow: 0 8px 20px rgba(0,0,0,0.8); transform: scaleX(-1); background: #1a1a24; }
+        
+        /* Інформаційний банер зверху */
+        .user-badge-container { position: absolute; top: 20px; left: 20px; display: flex; align-items: center; gap: 8px; z-index: 10; background: rgba(10, 10, 12, 0.75); padding: 6px 14px; border-radius: 20px; backdrop-filter: blur(5px); border: 1px solid rgba(255,255,255,0.05); }
+        .name-wrapper { display: flex; align-items: center; gap: 6px; }
+        .username-text { color: #fff; font-weight: 600; font-size: 15px; }
+
+        /* БЛИСКУЧА СИНЯ ГАЛОЧКА */
+        .verified-badge { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; background: #0044ff; border: 1.5px solid #00d2ff; border-radius: 50%; color: #fff; font-size: 11px; font-weight: bold; overflow: hidden; box-shadow: 0 0 8px rgba(0, 210, 255, 0.6); user-select: none; }
+        .verified-badge::after { content: ''; position: absolute; top: -50%; left: -100%; width: 40%; height: 200%; background: linear-gradient(to right, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0.9) 50%, rgba(255, 255, 255, 0) 100%); transform: rotate(30deg); animation: shine-tick 2.2s infinite linear; }
+        @keyframes shine-tick { 0% { left: -100%; } 100% { left: 200%; } }
+
+        /* БЛИСКУЧА СИНЯ ПЛАШКА DEVELOPER */
+        .dev-badge { position: relative; padding: 3px 8px; font-size: 11px; font-weight: 900; font-family: monospace; letter-spacing: 1px; color: #fff; background: #0044ff; border: 1px solid #00d2ff; border-radius: 4px; overflow: hidden; box-shadow: 0 0 10px rgba(0, 210, 255, 0.5); }
+        .dev-badge::after { content: ''; position: absolute; top: -50%; left: -60%; width: 30%; height: 200%; background: linear-gradient(to right, rgba(255,255,255,0) 0%, rgba(255,255,255,0.7) 50%, rgba(255,255,255,0) 100%); transform: rotate(25deg); animation: shine 2.5s infinite linear; }
+        @keyframes shine { 0% { left: -60%; } 100% { left: 140%; } }
+
+        /* Нижнє меню управління */
+        .controls { padding: 20px; display: flex; flex-direction: column; gap: 12px; background: #0a0a0c; align-items: center; border-top: 1px solid #1a1a24; }
+        .select-group { display: flex; gap: 10px; width: 90%; max-width: 400px; }
+        select { flex: 1; padding: 10px; border-radius: 8px; border: 1px solid #2d2d3d; background: #121216; color: #9ca3af; font-size: 14px; outline: none; }
+        
+        #requestTickBtn { width: 90%; max-width: 400px; padding: 10px; background: #121216; color: #00d2ff; border: 1px solid #0044ff; border-radius: 8px; font-weight: bold; font-size: 13px; cursor: pointer; margin-bottom: 5px; }
+
+        .btn-group { display: flex; gap: 10px; width: 90%; max-width: 400px; }
+        #nextBtn { flex: 2; padding: 16px; font-size: 16px; font-weight: bold; border-radius: 12px; border: none; background: #2481cc; color: white; cursor: pointer; }
+        #reportBtn { flex: 1; background: #ff9500; color: white; border: none; border-radius: 12px; font-weight: bold; display: none; cursor: pointer; }
+
+        /* ПАНЕЛЬ РОЗРОБНИКА */
+        #adminModerationPanel { display: none; flex-direction: column; gap: 8px; width: 90%; max-width: 400px; background: #121216; padding: 12px; border-radius: 12px; border: 1px dashed #00d2ff; }
+        .admin-row { display: flex; gap: 8px; width: 100%; }
+        .admin-btn { flex: 1; padding: 10px; background: #ff3b30; color: white; border: none; border-radius: 8px; font-weight: bold; font-size: 13px; cursor: pointer; }
+        .admin-btn.mute { background: #5856d6; }
+        #unbanIdInput { flex: 1; padding: 8px; border-radius: 6px; border: 1px solid #2d2d3d; background: #0a0a0c; color: #fff; font-size: 14px; }
+    </style>
+</head>
+<body>
+
+    <!-- ЕКРАН ПЕРЕВІРКИ ВІКУ ТА НІКНЕЙМУ -->
+    <div id="onboarding-screen">
+        <div class="form-card">
+            <h2>Вхід у Чат-Рулетку</h2>
+            <div class="input-group">
+                <label for="nickname">Придумайте нікнейм</label>
+                <input type="text" id="nickname" placeholder="Ваше ім'я або нік">
+            </div>
+            <div class="input-group">
+                <label for="age">Ваш вік (мінімум 15 років)</label>
+                <input type="number" id="age" placeholder="Скільки вам років?">
+            </div>
+            <button id="startAppBtn">Увійти в чат</button>
+        </div>
+    </div>
+
+    <!-- ОСНОВНИЙ ІНТЕРФЕЙС РОЗМОВИ -->
+    <div id="video-container">
+        <div class="user-badge-container">
+            <div class="name-wrapper" id="nameWrapper">
+                <span class="username-text" id="peerInfo">Очікування пошуку...</span>
+            </div>
+            <div id="devBadgeContainer"></div>
+        </div>
+        <video id="remoteVideo" autoplay playsinline></video>
+        <video id="localVideo" autoplay playsinline muted></video>
+    </div>
+
+    <div class="controls">
+        <div class="select-group">
+            <select id="videoSource"><option value="">Камера</option></select>
+            <select id="audioSource"><option value="">Мікрофон</option></select>
+        </div>
+        
+        <button id="requestTickBtn" onclick="requestVerification()">✨ Подати заявку на синю галочку ✓</button>
+
+        <div class="btn-group">
+            <button id="nextBtn">Почати пошук</button>
+            <button id="reportBtn">⚠️ Репорт</button>
+        </div>
+        
+        <!-- АДМІНКА РОЗРОБНИКА -->
+        <div id="adminModerationPanel">
+            <div class="admin-row" style="margin-bottom: 5px;">
+                <button class="admin-btn mute" onclick="mutePeer('mic')">Глушити Мік 🎤</button>
+                <button class="admin-btn mute" onclick="mutePeer('cam')">Глушити Кам 📷</button>
+            </div>
+            <button class="admin-btn" style="width: 100%; margin-bottom: 8px;" onclick="adminBanCurrent()">🚫 ТИМЧАСОВИЙ БАН КОРИСТУВАЧА</button>
+            <div class="admin-row">
+                <input type="number" id="unbanIdInput" placeholder="TG ID для розбану">
+                <button onclick="adminUnbanById()" style="background: #34c759; color: white; padding: 8px 15px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">🔓 Розбан</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+
+        // ⚠️ ЗАМІНІТЬ ПІСЛЯ ЗАПУСКУ НА БЕЗКОШТОВНЕ ПОСИЛАННЯ ВІД RENDER.COM
+        const socket = io('https://onrender.com'); 
+        
+        const localVideo = document.getElementById('localVideo');
+        const remoteVideo = document.getElementById('remoteVideo');
+        const nextBtn = document.getElementById('nextBtn');
+        const reportBtn = document.getElementById('reportBtn');
+        const videoSelect = document.getElementById('videoSource');
+        const audioSelect = document.getElementById('audioSource');
+
+        let localStream;
+        let peerConnection;
+        let myNickname = "";
+        let myAge = 0;
+        const rtcConfig = { iceServers: [{ urls: 'stun:://google.com' }] };
+
+        window.addEventListener('DOMContentLoaded', () => {
+            const savedNick = localStorage.getItem('chat_nick');
+            const savedAge = localStorage.getItem('chat_age');
+            if (savedNick && savedAge) {
+                myNickname = savedNick; myAge = parseInt(savedAge);
+                document.getElementById('onboarding-screen').style.display = 'none';
+                startMedia();
+            }
+        });
+
+        document.getElementById('startAppBtn').addEventListener('click', () => {
+            const nickInput = document.getElementById('nickname').value.trim();
+// Код ініціалізації кнопки входу (початок вашого блоку події кнопки)
+const nickInput = document.getElementById('nickname').value.trim();
+const ageInput = parseInt(document.getElementById('age').value);
+
+if (!nickInput) return alert("Будь ласка, введіть нікнейм!");
+if (isNaN(ageInput) || ageInput < 15) return alert("Вхід дозволено лишь особам від 15 років!");
+
+myNickname = nickInput; 
+myAge = ageInput;
+
+localStorage.setItem('chat_nick', myNickname);
+localStorage.setItem('chat_age', myAge);
+document.getElementById('onboarding-screen').style.display = 'none';
+startMedia();
+
+async function startMedia() {
+    try {
+        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        localVideo.srcObject = localStream;
+        await updateDeviceList();
+        if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
+            socket.emit('auth', { id: tg.initDataUnsafe.user.id, first_name: tg.initDataUnsafe.user.first_name, custom_nick: myNickname, custom_age: myAge });
+        }
+        videoSelect.onchange = changeDevices;
+        audioSelect.onchange = changeDevices;
+    } catch (err) { 
+        alert("Потрібен доступ до камери та мікрофона."); 
+    }
+}
+
+async function updateDeviceList() {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    videoSelect.innerHTML = ''; 
+    audioSelect.innerHTML = '';
+    devices.forEach(device => {
+        const option = document.createElement('option'); 
+        option.value = device.deviceId;
+        if (device.kind === 'videoinput') { 
+            option.text = device.label || `Камера ${videoSelect.length + 1}`; 
+            videoSelect.appendChild(option); 
+        } else if (device.kind === 'audioinput') { 
+            option.text = device.label || `Мікрофон ${audioSelect.length + 1}`; 
+            audioSelect.appendChild(option); 
+        }
+    });
+}
+
+async function changeDevices() {
+    if (localStream) localStream.getTracks().forEach(track => track.stop());
+    localStream = await navigator.mediaDevices.getUserMedia({
+        video: { deviceId: videoSelect.value ? { exact: videoSelect.value } : undefined },
+        audio: { deviceId: audioSelect.value ? { exact: audioSelect.value } : undefined }
+    });
+    localVideo.srcObject = localStream;
+    if (peerConnection) {
+        const senders = peerConnection.getSenders();
+        const vSender = senders.find(s => s.track.kind === 'video');
+        const aSender = senders.find(s => s.track.kind === 'audio');
+        if (vSender && localStream.getVideoTracks().length > 0) vSender.replaceTrack(localStream.getVideoTracks()[0]);
+        if (aSender && localStream.getAudioTracks().length > 0) aSender.replaceTrack(localStream.getAudioTracks()[0]);
+    }
+}
+
+nextBtn.addEventListener('click', () => {
+    nextBtn.innerText = "Шукаємо...";
+    document.getElementById('peerInfo').innerText = "Пошук пари...";
+    document.getElementById('devBadgeContainer').innerHTML = '';
+    const existingTick = document.querySelector('.verified-badge'); 
+    if (existingTick) existingTick.remove();
+    remoteVideo.srcObject = null;
+    if (peerConnection) { peerConnection.close(); peerConnection = null; }
+    socket.emit('next_user');
+});
+
+socket.on('start_call', (data) => {
+    nextBtn.innerText = "Наступний ➡️"; 
+    reportBtn.style.display = 'block';
+    document.getElementById('peerInfo').innerText = `${data.peerNick}, ${data.peerAge} р.`;
+    if (data.peerIsVerified) {
+        const tick = document.createElement('div'); 
+        tick.className = 'verified-badge'; 
+        tick.innerHTML = '✓';
+        document.getElementById('nameWrapper').appendChild(tick);
+    }
+    if (data.peerIsAdmin) { 
+        document.getElementById('devBadgeContainer').innerHTML = '<div class="dev-badge">DEVELOPER</div>'; 
+    }
+    initWebRTC(data.creator);
+});
+
+socket.on('admin_verified', () => {
+    document.getElementById('adminModerationPanel').style.display = 'flex';
+    document.getElementById('requestTickBtn').style.display = 'none';
+});
+
+function requestVerification() { 
+    socket.emit('request_verification_check'); 
+}
+
+socket.on('verification_result', (data) => {
+    alert(data.message);
+    if (data.success) document.getElementById('requestTickBtn').style.display = 'none';
+});
+
+function mutePeer(type) { 
+    socket.emit('admin_mute_peer', type); 
+}
+
+function adminBanCurrent() {
+    const reason = prompt("Введіть ПРИЧИНУ бану (ОБОВ'ЯЗКОВО):");
+    if (!reason || reason.trim() === "") return alert("Без причини забанити не можна!");
+    
+    const timeType = prompt("Одиниця часу:\n1 — Хвилини\n2 — Години\n3 — Дні");
+    const count = parseInt(prompt("Введіть КІЛЬКІСТЬ часу:"));
+    if (isNaN(count) || count <= 0 || !['1','2','3'].includes(timeType)) return alert("Помилка вводу!");
+    
+    let mins = count; 
+    let txt = `${count} хв.`;
+    if (timeType === '2') { mins = count * 60; txt = `${count} год.`; }
+    if (timeType === '3') { mins = count * 24 * 60; txt = `${count} дн.`; }
+    
+    socket.emit('admin_action', { action: 'ban_current', reason: reason, durationMinutes: mins, durationText: txt });
+}
+
+function adminUnbanById() {
+    const id = document.getElementById('unbanIdInput').value;
+    if(id) socket.emit('admin_action', { action: 'unban_by_id', targetId: id });
+}
+
+socket.on('force_mute', (data) => {
+    if (!localStream) return;
+    localStream.getTracks().forEach(t => { 
+        if(t.kind === (data.type === 'mic' ? 'audio' : 'video')) t.enabled = false; 
+    });
+    alert(`Розробник вимкнув ваш ${data.type === 'mic' ? 'мікрофон' : 'камеру'}!`);
+});
+
+socket.on('banned', (data) => {
+    document.body.innerHTML = `<div style="color: #fff; text-align: center; margin-top: 35vh; font-family: sans-serif; padding: 20px; background:#0a0a0c; height:100vh;"><h2 style="color:#ff3b30;">🚫 Доступ обмежено</h2><p>Причина: <span style="color:#ff9500;">${data.reason}</span></p><p>Залишилось: <span style="color:#00d2ff;">${data.timeLeft || 'назавжди'}</span></p></div>`;
+});
+
+socket.on('peer_disconnected', () => { 
+    document.getElementById('peerInfo').innerText = "Співрозмовник вийшов."; 
+    remoteVideo.srcObject = null; 
+});
+
+reportBtn.addEventListener('click', () => { 
+    if (confirm("Поскаржитися?")) socket.emit('report_peer'); 
+});
+
+socket.on('report_success', () => { 
+    alert("Скаргу прийнято."); 
+    nextBtn.click(); 
+});
+
+socket.on('admin_msg', (msg) => { 
+    alert(msg); 
+    nextBtn.click(); 
+});
+
+async function initWebRTC(isCreator) {
+    peerConnection = new RTCPeerConnection(rtcConfig);
+    localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+    
+    peerConnection.ontrack = (e) => { 
+        if (remoteVideo.srcObject !== e.streams[0]) remoteVideo.srcObject = e.streams[0]; 
+    };
+    
+    peerConnection.onicecandidate = (e) => { 
+        if (e.candidate) socket.emit('signal', { candidate: e.candidate }); 
+    };
+    
+    socket.on('signal', async (d) => {
+        if (!peerConnection) return;
+        if (d.sdp) {
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(d.sdp));
+            if (d.sdp.type === 'offer') { 
+                const ans = await peerConnection.createAnswer(); 
+                await peerConnection.setLocalDescription(ans); 
+                socket.emit('signal', { sdp: peerConnection.localDescription }); 
+            }
+        } else if (d.candidate) { 
+            await peerConnection.addIceCandidate(new RTCIceCandidate(d.candidate)); 
+        }
+    });
+    
+    if (isCreator) { 
+        const offer = await peerConnection.createOffer(); 
+        await peerConnection.setLocalDescription(offer); 
+        socket.emit('signal', { sdp: peerConnection.localDescription }); 
+    }
+}
+---
+
+### 💻 2. Бекенд сервера: `server.js`
+
+Цей файл відповідає за підключення, базу користувачів та тимчасові бани. Створіть на комп'ютері файл `server.js` і вставте в нього цей код:
+
+```javascript
+const express = require('express');
+const app = express();
+const http = require('http').createServer(app);
+const io = require('socket.io')(http, { cors: { origin: "*" } });
+
+// ВАШ ОФІЦІЙНИЙ TELEGRAM ID ЯК РОЗРОБНИКА
+const ADMIN_TG_ID = 7858510682; 
+
+let waitingUsers = []; 
+let bannedUsers = new Map(); // Map(tgId -> { expiresAt: Date, reason: String })
+let userDatabase = new Map(); // Map(tgId -> { firstSeen: Date, callsCount: Number, reportsCount: Number, isVerified: Boolean })
+
+io.on('connection', (socket) => {
+
+    socket.on('auth', (tgData) => {
+        socket.tgId = tgData.id;
+        socket.username = tgData.first_name;
+        socket.customNick = tgData.custom_nick || tgData.first_name;
+        socket.customAge = tgData.custom_age || 18;
+
+        // Створюємо профіль у базі, якщо людина вперше зайшла
+        if (!userDatabase.has(socket.tgId)) {
+            userDatabase.set(socket.tgId, {
+                firstSeen: new Date(),
+                callsCount: 0,
+                reportsCount: 0,
+                isVerified: (socket.tgId === ADMIN_TG_ID) // Ви верифіковані автоматично
+            });
+        }
+
+        socket.isVerified = userDatabase.get(socket.tgId).isVerified;
+
+        // ПЕРЕВІРКА НА ТИМЧАСОВИЙ АБО ПОСТІЙНИЙ БАН
+        if (bannedUsers.has(socket.tgId)) {
+            const banInfo = bannedUsers.get(socket.tgId);
+            const now = new Date();
+            if (now < banInfo.expiresAt) {
+                const timeLeft = Math.round((banInfo.expiresAt - now) / 1000 / 60);
+                socket.emit('banned', { reason: banInfo.reason, timeLeft: `${timeLeft} хв.` });
+                socket.disconnect();
+                return;
+            } else {
+                bannedUsers.delete(socket.tgId);
+            }
+        }
+
+        // ПЕРЕВІРКА СТАТУСУ РОЗРОБНИКА
+        if (socket.tgId === ADMIN_TG_ID) {
+            socket.isAdmin = true;
+            socket.emit('admin_verified');
+        }
+    });
+
+    // ПОШУК СПІВРОЗМОВНИКА
+    socket.on('next_user', () => {
+        if (socket.room) {
+            socket.to(socket.room).emit('peer_disconnected');
+            socket.leave(socket.room);
+            socket.room = null;
+        }
+        waitingUsers = waitingUsers.filter(id => id !== socket.id);
+
+        // Нарощуємо лічильник активності для перевірки на галочку
+        if (userDatabase.has(socket.tgId)) {
+            const profile = userDatabase.get(socket.tgId);
+            profile.callsCount += 1;
+            userDatabase.set(socket.tgId, profile);
+        }
+
+        if (waitingUsers.length === 0) {
+            waitingUsers.push(socket.id);
+            socket.emit('waiting');
+        } else {
+            const peerId = waitingUsers.shift();
+            const roomName = `room_${socket.id}_${peerId}`;
+            const peerSocket = io.sockets.sockets.get(peerId);
+            
+            if (peerSocket) {
+                socket.join(roomName);
+                peerSocket.join(roomName);
+                socket.room = roomName;
+                peerSocket.room = roomName;
+
+                io.to(peerId).emit('start_call', { 
+                    creator: false, 
+                    peerNick: socket.customNick, 
+                    peerAge: socket.customAge,
+                    peerIsAdmin: socket.isAdmin,
+                    peerIsVerified: socket.isVerified
+                });
+                socket.emit('start_call', { 
+                    creator: true, 
+                    peerNick: peerSocket.customNick, 
+                    peerAge: peerSocket.customAge,
+                    peerIsAdmin: peerSocket.isAdmin,
+                    peerIsVerified: peerSocket.isVerified
+                });
+            }
+        }
+    });
+
+    // ЗАЯВКА НА СИНЮ ГАЛОЧКУ (АВТОМАТИЧНА ПЕРЕВІРКА СЕРВЕРОМ)
+    socket.on('request_verification_check', () => {
+        if (!socket.tgId) return;
+        const profile = userDatabase.get(socket.tgId);
+        
+        if (profile.isVerified) return socket.emit('verification_result', { success: false, message: "Ви вже верифіковані! ✨" });
+
+        const now = new Date();
+        const oneMonthAgo = new Date();
+        oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1); // 1 місяць стажу в чаті
+
+        if (profile.firstSeen > oneMonthAgo) {
+            return socket.emit('verification_result', { success: false, message: "❌ Відмовлено! Ваш акаунт має бути зареєстрований у чаті не менше 1 місяця." });
+        }
+        if (profile.reportsCount > 0) {
+            return socket.emit('verification_result', { success: false, message: `❌ Відмовлено! На вас було подано скарг: ${profile.reportsCount}. Має бути 0 репортів.` });
+        }
+        if (profile.callsCount < 50) {
+            return socket.emit('verification_result', { success: false, message: `❌ Відмовлено! Мало активності. Зробіть щонайменше 50 пошуків (зараз: ${profile.callsCount}).` });
+        }
+
+        // Успішно активовано
+        profile.isVerified = true;
+        socket.isVerified = true;
+        userDatabase.set(socket.tgId, profile);
+        socket.emit('verification_result', { success: true, message: "🎉 Вітаємо! Всі умови виконано. Вам видано синю блискучу галочку! ✓" });
+    });
+
+    // АДМІН-ФУНКЦІЇ РОЗРОБНИКА
+    socket.on('admin_mute_peer', (type) => {
+        if (socket.isAdmin && socket.room) socket.to(socket.room).emit('force_mute', { type });
+    });
+
+    socket.on('admin_action', (data) => {
+        if (!socket.isAdmin) return;
+        if (data.action === 'ban_current' && socket.room) {
+            const roomSockets = io.sockets.adapter.rooms.get(socket.room);
+            let peerSocketId = [...roomSockets].find(id => id !== socket.id);
+            let peerSocket = io.sockets.sockets.get(peerSocketId);
+
+            if (peerSocket) {
+                const expiresAt = new Date();
+                expiresAt.setMinutes(expiresAt.getMinutes() + data.durationMinutes);
+                bannedUsers.set(peerSocket.tgId, { expiresAt, reason: data.reason }); // Причина записується обов'язково
+                
+                peerSocket.emit('banned', { reason: data.reason, timeLeft: data.durationText });
+                peerSocket.disconnect();
+                socket.emit('admin_msg', `Користувача забанено за причиною: ${data.reason}`);
+            }
+        } else if (data.action === 'unban_by_id') {
+            bannedUsers.delete(parseInt(data.targetId));
+            socket.emit('admin_msg', `Користувача успішно розбанено.`);
+        }
+    });
+
+    // СКАРГИ ВІД ЗВИЧАЙНИХ ЮЗЕРІВ
+    socket.on('report_peer', () => {
+        if (!socket.room) return;
+        const roomSockets = io.sockets.adapter.rooms.get(socket.room);
+        let peerId = [...roomSockets].find(id => id !== socket.id);
+        let peerSocket = io.sockets.sockets.get(peerId);
+        if (peerSocket) {
+            const profile = userDatabase.get(peerSocket.tgId);
+            profile.reportsCount += 1;
+            userDatabase.set(peerSocket.tgId, profile);
+
+            if (profile.reportsCount >= 3) {
+                const exp = new Date(); exp.setHours(exp.getHours() + 24); // Автобан на 24 години за 3 скарги
+                bannedUsers.set(peerSocket.tgId, { expiresAt: exp, reason: "Автобан за 3 скарги користувачів" });
+                peerSocket.emit('banned', { reason: "Автобан за скарги", timeLeft: "24 год." });
+                peerSocket.disconnect();
+            }
+            socket.emit('report_success');
+        }
+    });
+
+    socket.on('disconnect', () => {
+        waitingUsers = waitingUsers.filter(id => id !== socket.id);
+        if (socket.room) socket.to(socket.room).emit('peer_disconnected');
+    });
+    socket.on('signal', (data) => { if (socket.room) socket.to(socket.room).emit('signal', data); });
+});
+
+http.listen(3000, () => console.log('Сервер чат-рулетки працює на порту 3000'));
